@@ -75,6 +75,9 @@ InitHotkeys() {
     } else {
         Hotkey("~*" triggerKey, OnTriggerDown)
         Hotkey("~*" triggerKey " Up", OnTriggerUp)
+
+        if (triggerKey = "LAlt" || triggerKey = "RAlt")
+            Hotkey("~*Tab", OnNativeAltTab)
     }
 }
 
@@ -90,20 +93,34 @@ OnTriggerDown(*) {
     RegisterAppHotkeys()
 
     ; GUI 显示仍然可以延迟
-    ShowTimer := SetTimer(ShowAppSwitcher, -Config.ShowDelay)
+    SetTimer(ShowAppSwitcher, -Config.ShowDelay)
+    ShowTimer := true
 }
 OnTriggerUp(*) {
-    global TriggerHeld, ShowTimer, IsVisible
+    global TriggerHeld
 
     TriggerHeld := false
+    CancelShowTimer()
+    HideAppSwitcher()
+}
+
+OnNativeAltTab(*) {
+    global TriggerHeld
+
+    if (!TriggerHeld)
+        return
+
+    TriggerHeld := false
+    CancelShowTimer()
+    HideAppSwitcher()
+}
+
+CancelShowTimer() {
+    global ShowTimer
 
     if (ShowTimer) {
         SetTimer(ShowAppSwitcher, 0)
-        ShowTimer := 0
-    }
-
-    if (IsVisible) {
-        HideAppSwitcher()
+        ShowTimer := false
     }
 }
 
@@ -239,8 +256,9 @@ GetIconPath(appInfo) {
 
 ; ============== 显示切换界面 ==============
 ShowAppSwitcher() {
-    global AppGui, IsVisible, AppShortcuts
+    global AppGui, IsVisible, AppShortcuts, ShowTimer, TriggerHeld
 
+    ShowTimer := false
     if (!TriggerHeld)
         return
 
@@ -252,15 +270,24 @@ ShowAppSwitcher() {
         CreateAppGui()
     }
 
+    if (!TriggerHeld)
+        return
+
     IsVisible := true
+    if (!TriggerHeld)
+        HideAppSwitcher()
+
     ; 移除这里的 RegisterAppHotkeys()，已在 OnTriggerDown 中调用
 }
 
 CreateAppGui() {
-    global AppGui, AppShortcuts
+    global AppGui, AppShortcuts, TriggerHeld
 
-    if (AppGui) {
-        try AppGui.Destroy()
+    oldGui := AppGui
+    AppGui := ""
+
+    if (oldGui) {
+        try oldGui.Destroy()
     }
 
     ; 计算布局 - 横向排列
@@ -276,10 +303,10 @@ CreateAppGui() {
     guiHeight := itemSize + keyBadgeH + 25
 
     ; 创建 GUI
-    AppGui := Gui("+AlwaysOnTop -Caption +ToolWindow")
-    AppGui.BackColor := Config.BGColor
-    AppGui.MarginX := 0
-    AppGui.MarginY := 0
+    newGui := Gui("+AlwaysOnTop -Caption +ToolWindow")
+    newGui.BackColor := Config.BGColor
+    newGui.MarginX := 0
+    newGui.MarginY := 0
 
     ; 遍历配置的应用
     index := 0
@@ -300,7 +327,7 @@ CreateAppGui() {
                 hIcon := LoadPicture(iconPath, "w" iconSize " h" iconSize, &imgType)
                 if (hIcon) {
                     picType := (imgType = 1) ? "HICON:" : "HBITMAP:"
-                    AppGui.AddPicture(
+                    newGui.AddPicture(
                         "x" iconX " y" iconY " w" iconSize " h" iconSize,
                         picType hIcon
                     )
@@ -311,7 +338,7 @@ CreateAppGui() {
 
         if (!iconLoaded) {
             ; 没有图标时显示首字母
-            AppGui.AddText(
+            newGui.AddText(
                 "x" iconX " y" iconY " w" iconSize " h" iconSize " Center c808080 Background303030 +0x200",
                 SubStr(appInfo.exe, 1, 1)
             ).SetFont("s16 Bold", Config.FontName)
@@ -322,11 +349,11 @@ CreateAppGui() {
         keyX := x + itemPadding + (iconSize - keyBadgeW) / 2
         keyY := y + itemPadding + iconSize + 5
 
-        keyBG := AppGui.AddText(
+        keyBG := newGui.AddText(
             "x" keyX " y" keyY " w" keyBadgeW " h" keyBadgeH " Center Background" Config.KeyBGColor
         )
 
-        keyLabel := AppGui.AddText(
+        keyLabel := newGui.AddText(
             "x" keyX " y" keyY " w" keyBadgeW " h" keyBadgeH " Center c" Config.KeyTextColor " BackgroundTrans +0x200",
             keyText
         )
@@ -341,20 +368,30 @@ CreateAppGui() {
     xPos := (screenWidth - guiWidth) / 2
     yPos := (screenHeight - guiHeight) / 2
 
+    if (!TriggerHeld) {
+        try newGui.Destroy()
+        return
+    }
+
     ; 显示窗口
-    AppGui.Show("x" xPos " y" yPos " w" guiWidth " h" guiHeight " NoActivate")
-    WinSetTransparent(Config.Opacity, AppGui)
+    newGui.Show("x" xPos " y" yPos " w" guiWidth " h" guiHeight " NoActivate")
+    WinSetTransparent(Config.Opacity, newGui)
 
     ; 设置圆角
     if (Config.RoundCorner > 0) {
         try {
             DllCall("dwmapi\DwmSetWindowAttribute",
-                "Ptr", AppGui.Hwnd,
+                "Ptr", newGui.Hwnd,
                 "UInt", 33,
                 "UInt*", 2,
                 "UInt", 4)
         }
     }
+
+    AppGui := newGui
+
+    if (!TriggerHeld)
+        HideAppSwitcher()
 }
 
 ; ============== 隐藏切换界面 ==============
